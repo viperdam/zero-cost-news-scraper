@@ -12,3 +12,7 @@ class NewsArticleItem(scrapy.Item):
     title = scrapy.Field()
     publication_date = scrapy.Field()
     summary = scrapy.Field()
+    content = scrapy.Field()
+    source = scrapy.Field()
+    author = scrapy.Field()
+    category = scrapy.Field()

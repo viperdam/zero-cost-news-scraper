@@ -5,7 +5,7 @@
 
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Table, Column, Integer, String, DateTime, MetaData
+from sqlalchemy import create_engine, Table, Column, Integer, String, DateTime, MetaData, Text, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import IntegrityError
 from itemadapter import ItemAdapter
@@ -24,13 +24,30 @@ class DatabasePipeline:
         self.engine = create_engine(self.database_url)
         self.metadata = MetaData()
         
-        # Define articles table schema
+        # Generate batch ID for this scraping session
+        self.batch_id = f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        self.session_start = datetime.now()
+        self.batch_article_count = 0
+        
+        # Get next run number
+        self.run_number = self._get_next_run_number()
+        
+        # Define articles table schema (with batch tracking)
         self.articles_table = Table('articles', self.metadata,
             Column('id', Integer, primary_key=True, autoincrement=True),
             Column('url', String, unique=True, nullable=False),
             Column('title', String, nullable=False),
             Column('publication_date', DateTime, nullable=True),
-            Column('summary', String, nullable=True)
+            Column('summary', String, nullable=True),
+            Column('source', String, nullable=True),
+            Column('content', Text, nullable=True),
+            Column('author', String, nullable=True),
+            Column('scraped_at', DateTime, nullable=True),
+            Column('category', String, nullable=True),
+            Column('scraping_batch_id', String, nullable=True),
+            Column('scraping_session_start', DateTime, nullable=True),
+            Column('articles_in_batch', Integer, nullable=True),
+            Column('scraping_run_number', Integer, nullable=True)
         )
         
         # Create tables if they don't exist
@@ -45,12 +62,22 @@ class DatabasePipeline:
         adapter = ItemAdapter(item)
         
         try:
-            # Prepare article data
+            # Prepare article data with batch tracking
+            self.batch_article_count += 1
             article_data = {
                 'url': adapter.get('url'),
                 'title': adapter.get('title'),
                 'publication_date': self._parse_date(adapter.get('publication_date')),
-                'summary': adapter.get('summary')
+                'summary': adapter.get('summary'),
+                'source': adapter.get('source', 'Unknown'),
+                'content': adapter.get('content'),
+                'author': adapter.get('author'),
+                'scraped_at': datetime.now(),
+                'category': adapter.get('category'),
+                'scraping_batch_id': self.batch_id,
+                'scraping_session_start': self.session_start,
+                'articles_in_batch': 0,  # Will be updated at end
+                'scraping_run_number': self.run_number
             }
             
             # Validate required fields
@@ -63,7 +90,7 @@ class DatabasePipeline:
             self.session.execute(insert_stmt)
             self.session.commit()
             
-            spider.logger.info(f"Successfully saved article: {article_data['url']}")
+            spider.logger.info(f"[BATCH {self.batch_id}] Saved article #{self.batch_article_count} from {article_data['source']}: {article_data['title'][:50]}...")
             
         except IntegrityError as e:
             # Handle duplicate URL (expected behavior)
@@ -99,8 +126,41 @@ class DatabasePipeline:
     
     def close_spider(self, spider):
         """Clean up database connection when spider closes"""
+        # Update articles_in_batch count for all articles in this batch
+        try:
+            update_batch_count = text("""
+                UPDATE articles 
+                SET articles_in_batch = :batch_count 
+                WHERE scraping_batch_id = :batch_id
+            """)
+            
+            self.session.execute(update_batch_count, {
+                'batch_count': self.batch_article_count,
+                'batch_id': self.batch_id
+            })
+            self.session.commit()
+            
+            spider.logger.info(f"[BATCH COMPLETE] {self.batch_id}: {self.batch_article_count} articles in batch")
+            spider.logger.info(f"[SESSION] Started: {self.session_start}, Run: #{self.run_number}")
+            
+        except Exception as e:
+            spider.logger.error(f"[ERROR] Failed to update batch count: {e}")
+        
         self.session.close()
-        spider.logger.info("Database connection closed")
+        spider.logger.info("[PIPELINE] Database connection closed")
+    
+    def _get_next_run_number(self):
+        """Get the next sequential run number"""
+        try:
+            with self.engine.connect() as conn:
+                result = conn.execute(text("""
+                    SELECT COALESCE(MAX(scraping_run_number), 0) + 1 
+                    FROM articles 
+                    WHERE scraping_run_number IS NOT NULL
+                """))
+                return result.scalar() or 1
+        except:
+            return 1
 
 
 class NewsScraperPipeline:

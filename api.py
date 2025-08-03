@@ -28,6 +28,15 @@ class Article(BaseModel):
     title: str
     publication_date: Optional[datetime]
     summary: Optional[str]
+    source: Optional[str]
+    content: Optional[str]
+    author: Optional[str]
+    scraped_at: Optional[datetime]
+    category: Optional[str]
+    scraping_batch_id: Optional[str]
+    scraping_session_start: Optional[datetime]
+    articles_in_batch: Optional[int]
+    scraping_run_number: Optional[int]
     
     class Config:
         from_attributes = True
@@ -37,6 +46,20 @@ class ArticleResponse(BaseModel):
     total: int
     page: int
     per_page: int
+
+class HourlyBatch(BaseModel):
+    batch_id: str
+    session_start: datetime
+    article_count: int
+    run_number: int
+    hours_ago: int
+    sources: List[str]
+    latest_article: Optional[datetime]
+    
+class HourlyBatchResponse(BaseModel):
+    batches: List[HourlyBatch]
+    total_batches: int
+    total_articles: int
 
 # FastAPI app
 app = FastAPI(
@@ -58,12 +81,19 @@ async def root():
     """Welcome message and API information"""
     return {
         "message": "Zero-Cost News Scraping API",
-        "description": "Automatically scraped and deduplicated news articles",
+        "description": "Automatically scraped and deduplicated news articles from multiple sources",
         "endpoints": {
-            "/articles/": "Get paginated list of articles",
+            "/articles/": "Get paginated list of articles (newest first)",
             "/articles/{id}": "Get specific article by ID",
             "/search/": "Search articles by title",
+            "/sources/": "Get articles filtered by news source",
             "/stats/": "Get database statistics"
+        },
+        "features": {
+            "multi_source": "CNN, BBC, Guardian, Reuters, AP News, NPR, TechCrunch",
+            "full_content": "Complete article text extraction",
+            "deduplication": "Automatic duplicate prevention",
+            "real_time": "Fresh articles every hour via GitHub Actions"
         },
         "github": "https://github.com/user/news-scraper",
         "status": "operational"
@@ -85,11 +115,11 @@ async def get_articles(
         total_result = db.execute(text("SELECT COUNT(*) FROM articles"))
         total = total_result.scalar()
         
-        # Get articles with pagination
+        # Get articles with pagination (newest first)
         query = text("""
-            SELECT id, url, title, publication_date, summary 
+            SELECT id, url, title, publication_date, summary, source, content, author, scraped_at, category
             FROM articles 
-            ORDER BY publication_date DESC, id DESC
+            ORDER BY COALESCE(publication_date, scraped_at) DESC, id DESC
             LIMIT :limit OFFSET :offset
         """)
         
@@ -102,7 +132,12 @@ async def get_articles(
                 url=row.url,
                 title=row.title,
                 publication_date=row.publication_date,
-                summary=row.summary
+                summary=row.summary,
+                source=row.source,
+                content=row.content,
+                author=row.author,
+                scraped_at=row.scraped_at,
+                category=row.category
             ))
         
         return ArticleResponse(
@@ -121,7 +156,7 @@ async def get_article(article_id: int, db: Session = Depends(get_db)):
     
     try:
         query = text("""
-            SELECT id, url, title, publication_date, summary 
+            SELECT id, url, title, publication_date, summary, source, content, author, scraped_at, category
             FROM articles 
             WHERE id = :article_id
         """)
@@ -137,7 +172,12 @@ async def get_article(article_id: int, db: Session = Depends(get_db)):
             url=row.url,
             title=row.title,
             publication_date=row.publication_date,
-            summary=row.summary
+            summary=row.summary,
+            source=row.source,
+            content=row.content,
+            author=row.author,
+            scraped_at=row.scraped_at,
+            category=row.category
         )
         
     except HTTPException:
@@ -172,10 +212,10 @@ async def search_articles(
         
         # Get matching articles with pagination
         search_query = text("""
-            SELECT id, url, title, publication_date, summary 
+            SELECT id, url, title, publication_date, summary, source, content, author, scraped_at, category
             FROM articles 
             WHERE title ILIKE :search_pattern
-            ORDER BY publication_date DESC, id DESC
+            ORDER BY COALESCE(publication_date, scraped_at) DESC, id DESC
             LIMIT :limit OFFSET :offset
         """)
         
@@ -192,7 +232,12 @@ async def search_articles(
                 url=row.url,
                 title=row.title,
                 publication_date=row.publication_date,
-                summary=row.summary
+                summary=row.summary,
+                source=row.source,
+                content=row.content,
+                author=row.author,
+                scraped_at=row.scraped_at,
+                category=row.category
             ))
         
         return ArticleResponse(
@@ -200,6 +245,196 @@ async def search_articles(
             total=total,
             page=page,
             per_page=per_page
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/sources/", response_model=ArticleResponse, summary="Get articles by source")
+async def get_articles_by_source(
+    source: str = Query(..., description="News source (e.g., 'CNN', 'BBC', 'Guardian')"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Articles per page"),
+    db: Session = Depends(get_db)
+):
+    """Get articles filtered by news source"""
+    
+    try:
+        # Calculate offset
+        offset = (page - 1) * per_page
+        
+        # Get total count for this source
+        count_query = text("""
+            SELECT COUNT(*) FROM articles 
+            WHERE source ILIKE :source_pattern
+        """)
+        
+        source_pattern = f"%{source}%"
+        total_result = db.execute(count_query, {"source_pattern": source_pattern})
+        total = total_result.scalar()
+        
+        # Get articles from this source with pagination
+        source_query = text("""
+            SELECT id, url, title, publication_date, summary, source, content, author, scraped_at, category
+            FROM articles 
+            WHERE source ILIKE :source_pattern
+            ORDER BY COALESCE(publication_date, scraped_at) DESC, id DESC
+            LIMIT :limit OFFSET :offset
+        """)
+        
+        result = db.execute(source_query, {
+            "source_pattern": source_pattern,
+            "limit": per_page,
+            "offset": offset
+        })
+        
+        articles = []
+        for row in result:
+            articles.append(Article(
+                id=row.id,
+                url=row.url,
+                title=row.title,
+                publication_date=row.publication_date,
+                summary=row.summary,
+                source=row.source,
+                content=row.content,
+                author=row.author,
+                scraped_at=row.scraped_at,
+                category=row.category
+            ))
+        
+        return ArticleResponse(
+            articles=articles,
+            total=total,
+            page=page,
+            per_page=per_page
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/latest-hour/", response_model=ArticleResponse, summary="Get latest hour articles")
+async def get_latest_hour_articles(
+    per_page: int = Query(20, ge=1, le=100, description="Articles per page"),
+    db: Session = Depends(get_db)
+):
+    """Get articles from the most recent scraping session/hour"""
+    
+    try:
+        # Get the latest batch ID
+        latest_batch_query = text("""
+            SELECT scraping_batch_id 
+            FROM articles 
+            WHERE scraping_batch_id IS NOT NULL
+            ORDER BY scraping_session_start DESC 
+            LIMIT 1
+        """)
+        
+        latest_result = db.execute(latest_batch_query)
+        latest_batch = latest_result.scalar()
+        
+        if not latest_batch:
+            return ArticleResponse(articles=[], total=0, page=1, per_page=per_page)
+        
+        # Get all articles from latest batch
+        latest_articles_query = text("""
+            SELECT id, url, title, publication_date, summary, source, content, author, scraped_at, category,
+                   scraping_batch_id, scraping_session_start, articles_in_batch, scraping_run_number
+            FROM articles 
+            WHERE scraping_batch_id = :batch_id
+            ORDER BY COALESCE(publication_date, scraped_at) DESC, id DESC
+            LIMIT :limit
+        """)
+        
+        result = db.execute(latest_articles_query, {
+            "batch_id": latest_batch,
+            "limit": per_page
+        })
+        
+        articles = []
+        for row in result:
+            articles.append(Article(
+                id=row.id,
+                url=row.url,
+                title=row.title,
+                publication_date=row.publication_date,
+                summary=row.summary,
+                source=row.source,
+                content=row.content,
+                author=row.author,
+                scraped_at=row.scraped_at,
+                category=row.category,
+                scraping_batch_id=row.scraping_batch_id,
+                scraping_session_start=row.scraping_session_start,
+                articles_in_batch=row.articles_in_batch,
+                scraping_run_number=row.scraping_run_number
+            ))
+        
+        # Get total count for this batch
+        count_query = text("SELECT COUNT(*) FROM articles WHERE scraping_batch_id = :batch_id")
+        total_result = db.execute(count_query, {"batch_id": latest_batch})
+        total = total_result.scalar()
+        
+        return ArticleResponse(
+            articles=articles,
+            total=total,
+            page=1,
+            per_page=per_page
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@app.get("/by-hour/", response_model=HourlyBatchResponse, summary="Get articles by hourly batches")
+async def get_articles_by_hour(
+    hours_back: int = Query(24, ge=1, le=168, description="How many hours back to show"),
+    db: Session = Depends(get_db)
+):
+    """Get articles organized by hourly scraping batches"""
+    
+    try:
+        # Get batch statistics
+        batch_stats_query = text("""
+            SELECT 
+                scraping_batch_id,
+                scraping_session_start,
+                COUNT(*) as article_count,
+                scraping_run_number,
+                ARRAY_AGG(DISTINCT source) as sources,
+                MAX(scraped_at) as latest_article,
+                EXTRACT(EPOCH FROM (NOW() - scraping_session_start))/3600 as hours_ago
+            FROM articles 
+            WHERE scraping_batch_id IS NOT NULL
+            AND scraping_session_start >= NOW() - INTERVAL ':hours_back hours'
+            GROUP BY scraping_batch_id, scraping_session_start, scraping_run_number
+            ORDER BY scraping_session_start DESC
+        """)
+        
+        result = db.execute(batch_stats_query, {"hours_back": hours_back})
+        
+        batches = []
+        total_articles = 0
+        
+        for row in result:
+            hours_ago = int(row.hours_ago) if row.hours_ago else 0
+            sources = row.sources if row.sources else []
+            
+            batches.append(HourlyBatch(
+                batch_id=row.scraping_batch_id,
+                session_start=row.scraping_session_start,
+                article_count=row.article_count,
+                run_number=row.scraping_run_number or 0,
+                hours_ago=hours_ago,
+                sources=sources,
+                latest_article=row.latest_article
+            ))
+            
+            total_articles += row.article_count
+        
+        return HourlyBatchResponse(
+            batches=batches,
+            total_batches=len(batches),
+            total_articles=total_articles
         )
         
     except Exception as e:
@@ -257,6 +492,6 @@ if __name__ == "__main__":
     import uvicorn
     print("Starting Zero-Cost News Scraping API...")
     print("Database URL configured:", DATABASE_URL[:50] + "...")
-    print("API will be available at: http://localhost:8000")
-    print("Interactive docs at: http://localhost:8000/docs")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    print("API will be available at: http://localhost:8003")
+    print("Interactive docs at: http://localhost:8003/docs")
+    uvicorn.run(app, host="0.0.0.0", port=8003)

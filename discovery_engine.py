@@ -212,33 +212,115 @@ class NewsDiscovery:
 def main():
     """Main function for testing the discovery engine"""
     
-    # Test with some popular news sites
-    test_domains = [
-        'bbc.com',
-        'cnn.com',
-        'reuters.com'
+    # Comprehensive news sources with working RSS feeds (2025)
+    rss_sources = [
+        # CNN RSS feeds (working perfectly)
+        'http://rss.cnn.com/rss/cnn_topstories.rss',
+        'http://rss.cnn.com/rss/edition.rss',
+        'http://rss.cnn.com/rss/cnn_allpolitics.rss',
+        'http://rss.cnn.com/rss/money_news_economy.rss',
+        'http://rss.cnn.com/rss/cnn_world.rss',
+        'http://rss.cnn.com/rss/cnn_us.rss',
+        
+        # Guardian RSS feeds (excellent coverage)
+        'https://www.theguardian.com/rss',
+        'https://www.theguardian.com/world/rss',
+        'https://www.theguardian.com/us-news/rss',
+        'https://www.theguardian.com/uk-news/rss',
+        'https://www.theguardian.com/politics/rss',
+        'https://www.theguardian.com/technology/rss',
+        'https://www.theguardian.com/business/rss',
+        'https://www.theguardian.com/environment/rss',
+        'https://www.theguardian.com/science/rss',
+        
+        # BBC RSS feeds (comprehensive)
+        'http://feeds.bbci.co.uk/news/rss.xml',
+        'http://feeds.bbci.co.uk/news/world/rss.xml',
+        'http://feeds.bbci.co.uk/news/uk/rss.xml',
+        'http://feeds.bbci.co.uk/news/business/rss.xml',
+        'http://feeds.bbci.co.uk/news/technology/rss.xml',
+        'http://feeds.bbci.co.uk/news/politics/rss.xml',
+        'http://feeds.bbci.co.uk/news/health/rss.xml',
+        'http://feeds.bbci.co.uk/news/science_and_environment/rss.xml',
+        
+        # Reuters via Google News (24h only)
+        'https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com&ceid=US:en&hl=en-US&gl=US',
+        'https://news.google.com/rss/search?q=when:12h+allinurl:reuters.com+business&ceid=US:en&hl=en-US&gl=US',
+        'https://news.google.com/rss/search?q=when:12h+allinurl:reuters.com+technology&ceid=US:en&hl=en-US&gl=US',
+        
+        # NPR (working feeds)
+        'https://feeds.npr.org/1001/rss.xml',        # All Things Considered
+        'https://feeds.npr.org/1004/rss.xml',        # Morning Edition
+        'https://feeds.npr.org/1006/rss.xml',        # NPR News Now
+        'https://feeds.npr.org/1019/rss.xml',        # Politics Podcast
+        
+        # TechCrunch (tech news)
+        'https://feeds.feedburner.com/TechCrunch',
+        
+        # Working additional sources
+        'http://feeds.washingtonpost.com/rss/world',
+        'https://rss.nytimes.com/services/xml/rss/nyt/World.xml',
+        'https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml',
+        'https://rss.nytimes.com/services/xml/rss/nyt/Business.xml',
+        
+        # Financial news
+        'https://feeds.finance.yahoo.com/rss/2.0/headline',
+        'https://feeds.bloomberg.com/markets/news.rss',
+        
+        # Additional reliable sources
+        'https://www.cbsnews.com/latest/rss/main',
+        'https://feeds.nbcnews.com/nbcnews/public/news',
+        'https://feeds.abcnews.com/abcnews/topstories',
+        
+        # International sources
+        'https://feeds.skynews.com/feeds/rss/home.xml',
+        'https://www.aljazeera.com/xml/rss/all.xml',
+        
+        # Science and tech
+        'https://rss.cnn.com/rss/edition_technology.rss',
+        'https://feeds.ars-technica.com/arstechnica/index',
+        'http://feeds.reuters.com/reuters/technologyNews'
     ]
     
     discovery = NewsDiscovery()
-    urls = discovery.discover_all_urls(test_domains)
+    all_urls = []
     
-    print("\n" + "="*60)
-    print("[RESULTS] SAMPLE DISCOVERED URLS:")
-    print("="*60)
+    print("[START] Parsing multiple RSS feeds from major news sources")
+    print("="*80)
     
-    for i, url in enumerate(urls[:20], 1):  # Show first 20 URLs
+    for feed_url in rss_sources:
+        print(f"\n[PROCESSING] {feed_url}")
+        urls = discovery.parse_rss_feed(feed_url)
+        all_urls.extend(urls)
+        print(f"[FOUND] {len(urls)} URLs from this feed")
+    
+    # Remove duplicates while preserving order
+    unique_urls = []
+    seen = set()
+    for url in all_urls:
+        if url not in seen:
+            unique_urls.append(url)
+            seen.add(url)
+    
+    print(f"\n[COMPLETE] URL DISCOVERY COMPLETE")
+    print(f"[SUCCESS] Total unique URLs discovered: {len(unique_urls)}")
+    print("="*80)
+    
+    for i, url in enumerate(unique_urls[:20], 1):  # Show first 20 URLs
         print(f"{i:2d}. {url}")
     
-    if len(urls) > 20:
-        print(f"... and {len(urls) - 20} more URLs")
+    if len(unique_urls) > 20:
+        print(f"... and {len(unique_urls) - 20} more URLs")
     
     # Save URLs to file for scraper
-    if urls:
+    if unique_urls:
         with open('discovered_urls.txt', 'w') as f:
-            for url in urls:
+            for url in unique_urls:
                 f.write(f"{url}\n")
         print(f"\n[SAVE] URLs saved to 'discovered_urls.txt'")
-        print(f"[CMD] To run scraper: scrapy crawl news_spider -a urls=\"{','.join(urls[:5])}\"")
+        print(f"[INFO] Ready to scrape {len(unique_urls)} articles from multiple sources!")
+        
+        return unique_urls
 
 
 if __name__ == "__main__":
