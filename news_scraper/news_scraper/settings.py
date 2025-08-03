@@ -18,8 +18,8 @@ ADDONS = {}
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = "news_scraper (+http://www.yourdomain.com)"
 
-# Obey robots.txt rules - temporarily disabled for testing
-ROBOTSTXT_OBEY = False
+# Obey robots.txt rules - enabled for production
+ROBOTSTXT_OBEY = True
 
 # Concurrency and throttling settings
 #CONCURRENT_REQUESTS = 16
