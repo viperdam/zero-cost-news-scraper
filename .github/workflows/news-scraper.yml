@@ -10,6 +10,7 @@ on:
 jobs:
   scrape-news:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     
     steps:
     - name: Checkout repository
@@ -27,19 +28,31 @@ jobs:
         
     - name: Discover news URLs from RSS feeds
       id: discover
+      timeout-minutes: 10
       run: |
-        python discovery_engine.py
-        # Get first 20 URLs for this run to stay within GitHub Actions limits
-        URLS=$(head -20 discovered_urls.txt | tr '\n' ',' | sed 's/,$//')
-        echo "urls=$URLS" >> $GITHUB_OUTPUT
-        echo "Found $(wc -l < discovered_urls.txt) total URLs, using first 20"
+        timeout 600 python discovery_engine.py || echo "Discovery timeout, using available URLs"
+        # Get first 15 URLs for this run to stay within GitHub Actions limits  
+        if [ -f discovered_urls.txt ]; then
+          URLS=$(head -15 discovered_urls.txt | tr '\n' ',' | sed 's/,$//')
+          echo "urls=$URLS" >> $GITHUB_OUTPUT
+          echo "Found $(wc -l < discovered_urls.txt) total URLs, using first 15"
+          echo "Sources: CNN, Guardian, Reuters, BBC, NPR, TechCrunch, AP News"
+        else
+          echo "No URLs discovered, will skip scraping"
+          echo "urls=" >> $GITHUB_OUTPUT
+        fi
         
     - name: Run news scraper
+      timeout-minutes: 15
       env:
         DATABASE_URL: ${{ secrets.DATABASE_URL }}
       run: |
-        cd news_scraper
-        scrapy crawl news_spider -a urls="${{ steps.discover.outputs.urls }}"
+        if [ -n "${{ steps.discover.outputs.urls }}" ]; then
+          cd news_scraper
+          timeout 900 scrapy crawl news_spider -a urls="${{ steps.discover.outputs.urls }}" || echo "Scraper timeout"
+        else
+          echo "No URLs to scrape, skipping"
+        fi
         
     - name: Check scraping results
       env:
