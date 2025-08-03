@@ -302,6 +302,11 @@ def main():
             unique_urls.append(url)
             seen.add(url)
     
+    # Shuffle URLs to ensure good source diversity in workflow runs
+    import random
+    random.seed(42)  # Consistent shuffling for reproducibility
+    random.shuffle(unique_urls)
+    
     print(f"\n[COMPLETE] URL DISCOVERY COMPLETE")
     print(f"[SUCCESS] Total unique URLs discovered: {len(unique_urls)}")
     print("="*80)
