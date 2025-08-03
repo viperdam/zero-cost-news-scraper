@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(scrapy startproject:*)",
+      "Bash(python:*)",
+      "Bash(scrapy crawl news_spider:*)",
+      "Bash(curl:*)",
+      "Bash(mkdir:*)",
+      "Bash(winget install:*)",
+      "Bash(msiexec:*)",
+      "Bash(scoop install:*)",
+      "Bash(choco install:*)",
+      "Bash(powershell:*)",
+      "Bash(.gh_2.76.2_windows_amd64bingh.exe --version)",
+      "Bash(.bingh.exe:*)",
+      "Bash(bin/gh.exe:*)",
+      "Bash(git init:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

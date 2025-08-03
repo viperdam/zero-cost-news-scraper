@@ -1,0 +1,65 @@
+name: Automated News Scraping
+
+on:
+  schedule:
+    # Run every hour
+    - cron: '0 * * * *'
+  workflow_dispatch:
+    # Allow manual triggering
+
+jobs:
+  scrape-news:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Discover news URLs from RSS feeds
+      id: discover
+      run: |
+        python discovery_engine.py
+        # Get first 20 URLs for this run to stay within GitHub Actions limits
+        URLS=$(head -20 discovered_urls.txt | tr '\n' ',' | sed 's/,$//')
+        echo "urls=$URLS" >> $GITHUB_OUTPUT
+        echo "Found $(wc -l < discovered_urls.txt) total URLs, using first 20"
+        
+    - name: Run news scraper
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        cd news_scraper
+        scrapy crawl news_spider -a urls="${{ steps.discover.outputs.urls }}"
+        
+    - name: Check scraping results
+      env:
+        DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      run: |
+        python check_articles.py
+        
+    - name: Upload logs as artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scraping-logs-${{ github.run_number }}
+        path: |
+          news_scraper/scrapy_log.txt
+          discovered_urls.txt
+        retention-days: 7
+        
+    - name: Notify on failure
+      if: failure()
+      run: |
+        echo "News scraping workflow failed!"
+        echo "Check the logs for details."
+        # Could add email notification here

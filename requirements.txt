@@ -1,0 +1,10 @@
+scrapy==2.13.3
+psycopg2-binary==2.9.10
+sqlalchemy==2.0.40
+feedparser==6.0.10
+ultimate-sitemap-parser==1.4.0
+fastapi==0.115.8
+sqlmodel==0.0.24
+uvicorn==0.34.0
+requests==2.32.4
+python-dateutil==2.9.0.post0
